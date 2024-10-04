@@ -8,6 +8,7 @@ ver1.0
 ・アームを表すクラスをとりあえず作る (設計は詰めてない)
 ・木は片側のみのムカデグラフみたいにする
 ・移動もあまり頭いい方法ではない貪欲
+・ここのメモ更新するのだるいので結構忘れそう
 */
 
 #pragma GCC optimize("Ofast,unroll-loops,no-stack-protector,fast-math")
@@ -75,27 +76,27 @@ vector<string> s,t;
 bool is_input = false; //入力したか？の変数，使うかこれ？
 const int first_v = 5; //頂点数5で頭いいアルゴリズム思いついたとき用，頂点多いほど良さそうなので使わなさそう
 
-//辺のクラス
+//辺の構造体・何も考えてない設計
 struct Edge{
-    int to;
+    int to = -1;
     int w;
-    Edge(int to = -1,int w) : to(to),w(w) {}
 };
  
 struct Arm_tree{
     //アームを表す木の構造体
     //実装だるすぎて辺の重みは何も考慮していません->だるいけど考慮します...
 
-    int sz; //頂点数
+    int sz; //頂点数・辺数
     vector<Edge> p; //木の順列表現
     vector<vector<Edge> > g; //木の隣接リスト表現
     vector<pair<int,int>> now; //各頂点の今の座標
+
     bool is_init = false;
     Arm_tree(int sz = 0) : sz(sz),p(sz),g(sz) {};
 
     //辺の追加をする関数
-    //u-vに重みwの辺を張る
-    void add_edge(int u,int v,int w){
+    //u-vに重みwの辺を張る，initしてからadd_edgeしたら怒る
+    void add_edge(int u,int v,int w=1){
         
         if(u > v) swap(u,v);
         if(p.size() <= v) p.resize(v+1),g.resize(v+1),sz = v+1;
@@ -106,6 +107,7 @@ struct Arm_tree{
             assert(u != v);
         }
         if(p[v].to != -1){
+            if(is_init) cerr << "You can't add edge after initialize" << endl;
             cerr << "This edge break the tree" << endl;
             assert(p[v].to == -1);
         }
@@ -129,10 +131,48 @@ struct Arm_tree{
             assert(!ok);
         }
 
+        //DFSして各頂点の座標を求める
+        const pair<int,int> default_coord = make_pair(-1,-1);
+        now.resize(sz,default_coord);
+        queue<int> q;
+        q.push(0);
+        now[0] = make_pair(0,0);
+        while(!q.empty()){
+            int nxt = q.front();
+            q.pop();
+            for(auto [to,w] : g[nxt])if(now[to] == default_coord){
+                q.push(to);
+                now[to] = make_pair(now[nxt].first,now[nxt].second+w);
+            }
+        }
+
+        is_init = true;
+    }
+
+    //頂点vは葉ですか？
+    bool is_leaf(int v){
+        return g[v].size() == 1;
+    }
+
+    //各頂点の現在座標を出す関数
+    void output_now(){
+        rep(i,sz) cout << i << " -> (" << now[i].first << "," << now[i].second << ")" << endl;
+    }
+
+    void output_p(){}
+
+    //木をよく見るグラフ表記で出力する関数
+    void output_g(){
+        cout << sz << " " << sz-1 << endl;
+        rep(i,sz)if(i) cout << p[i].to << " " << i << endl;
     }
 
 };
 
+//答えの木を保持するやつをグローバルに確保
+Arm_tree ans_tree;
+
+//入力を受け取る
 void input(){
     is_input = true;
     cin >> n >> m >> v;
@@ -140,6 +180,8 @@ void input(){
     t.resize(n);
     rep(i,n) cin >> s[i];
     rep(i,n) cin >> t[i];
+
+    //既に置いてあるときは空欄にしておく
     rep(i,n)rep(j,n){
         if(s[i][j] == '1' && s[i][j] == t[i][j]){
             s[i][j] = t[i][j] = '0';
@@ -147,7 +189,23 @@ void input(){
     }
 }
 
+void test(){
+    rep(i,v)if(i){
+        int tar = 2*((i+1)/2)-2;
+        ans_tree.add_edge(i,tar);
+    }
+    ans_tree.init_for_arm();
+}
+
+//
+void solve(){
+    ans_tree.add_edge(0,1);
+}
+
 void output(){
+    ans_tree.output_g();
+    ans_tree.output_now();
+    
 }
 
 void dbg(){
@@ -157,6 +215,8 @@ int main() {
     ios::sync_with_stdio(false);
 	cin.tie(nullptr);
     input();
+    test();
+    output();
     //is_local = true;
     if(is_local) dbg();
 }
