@@ -82,14 +82,15 @@ struct Edge{
     int w;
 };
  
+//アームを表す木の構造体
+//実装だるすぎて辺の重みは何も考慮していません->だるいけど考慮します...
 struct Arm_tree{
-    //アームを表す木の構造体
-    //実装だるすぎて辺の重みは何も考慮していません->だるいけど考慮します...
-
-    int sz; //頂点数・辺数
+    int sz; //頂点数
     vector<Edge> p; //木の順列表現
     vector<vector<Edge> > g; //木の隣接リスト表現
     vector<pair<int,int>> now; //各頂点の今の座標
+    vector<string> op_history; //各回の操作を保存
+    vector<bool> is_hand;
 
     bool is_init = false;
     Arm_tree(int sz = 0) : sz(sz),p(sz),g(sz) {};
@@ -146,7 +147,71 @@ struct Arm_tree{
             }
         }
 
+        is_hand.resize(sz,false);
+
         is_init = true;
+    }
+
+    //実際に操作を行う関数
+    //cに入れた命令を行う (UDLR)
+    //vに入っている関節を回す・頂点iの親を軸としてi以下の頂点を回す．
+    //putに入っている頂点はPにする
+    //この設計がいい感じかはまだ未検討
+    void op(char c,vint &v,vint &put){
+        string ops(2*sz,'.');
+        
+        //アーム全体を動かす処理
+        pair<int,int> ps = {0,0};
+        if(c == 'L') ps.second--;
+        if(c == 'R') ps.second++;
+        if(c == 'U') ps.first--;
+        if(c == 'D') ps.first++;
+        rep(i,sz){
+            now[i] = make_pair(now[i].first+ps.first,now[i].second+ps.second);
+        }
+        ops[0] = c;
+
+        //うまく回転させる処理普通にわからないんですが...
+
+        //putの座標でつかむ処理
+        for(int x : put){
+            if(!is_leaf(x)){
+                cerr << "You operated [put] for not leaf vertex" << endl;
+            }else{
+                if(is_hand[x]){
+                    auto [u,v] = now[x];
+                    assert(s[u][v] != '1');
+                    if(t[u][v] == '1') t[u][v] = '0';
+                    else s[u][v] = '1';
+                }else{
+                    auto [u,v] = now[x];
+                    assert(s[u][v] == '1');
+                    s[u][v] = '0';
+                }
+                ops[sz+x] = 'P';
+                is_hand[x] = !is_hand[x];
+            }
+        }
+
+        op_history.push_back(ops);
+    }
+
+    //操作を行うとどの頂点がどこに行くかをシミュレートして座標を返す関数
+    vector<pair<int,int> > sim_op(char c,vint &v){
+        vector<pair<int,int> > res = now;
+
+        //アーム全体を動かす処理
+        pair<int,int> ps = {0,0};
+        if(c == 'L') ps.second--;
+        if(c == 'R') ps.second++;
+        if(c == 'U') ps.first--;
+        if(c == 'D') ps.first++;
+        rep(i,sz){
+            res[i] = make_pair(now[i].first+ps.first,now[i].second+ps.second);
+        }
+
+        //回転はまだうまくできていないので略
+        return res;
     }
 
     //頂点vは葉ですか？
@@ -154,9 +219,27 @@ struct Arm_tree{
         return g[v].size() == 1;
     }
 
+    //葉の頂点リストを返す
+    vector<int> leafs(){
+        vint res;
+        rep(i,sz)if(is_leaf(i)) res.push_back(i);
+        return res;
+    }
+
+    //葉の今いる座標とともにリストを返す
+    vector<pair<int,pair<int,int>>> leaf_pos(){
+        vector<pair<int,pair<int,int>>> res;
+        auto l = leafs();
+        for(int v : l) res.push_back(make_pair(v,now[v]));
+        return res;
+    }
+
     //各頂点の現在座標を出す関数
     void output_now(){
-        rep(i,sz) cout << i << " -> (" << now[i].first << "," << now[i].second << ")" << endl;
+        rep(i,sz){
+            if(i <= 9) cout << " ";
+            cout << i << " -> (" << now[i].first << "," << now[i].second << ") leaf? = " << is_leaf(i) << endl;
+        }
     }
 
     void output_p(){}
@@ -167,6 +250,23 @@ struct Arm_tree{
         rep(i,sz)if(i) cout << p[i].to << " " << i << endl;
     }
 
+    //今までの操作列を出力
+    void output_history(){
+        for(string s : op_history){
+            assert(s.size() == 2*sz);
+            cout << s << endl;
+        }
+    }
+
+    //AHCの提出時に必要な情報を出力する
+    void output(){
+        cout << sz << endl;
+        rep(i,sz)if(i){
+            cout << p[i].to << " " << p[i].w << endl;
+        }
+        cout << 0 << " " << 0 << endl;
+        output_history();
+    }
 };
 
 //答えの木を保持するやつをグローバルに確保
@@ -189,6 +289,8 @@ void input(){
     }
 }
 
+
+//テスト用・ローカルでしか回さない
 void test(){
     rep(i,v)if(i){
         int tar = 2*((i+1)/2)-2;
@@ -197,15 +299,21 @@ void test(){
     ans_tree.init_for_arm();
 }
 
-//
+//solve関数
+//ver1 戦略
+//・横一列の葉を使ってグリッド上を走査する
+//・回転の頭いい使い方がわからないのでまずなしでやる
 void solve(){
-    ans_tree.add_edge(0,1);
+    rep(i,v)if(i){
+        int tar = 2*((i+1)/2)-2;
+        ans_tree.add_edge(i,tar);
+    }
+    ans_tree.init_for_arm();
+
 }
 
 void output(){
-    ans_tree.output_g();
-    ans_tree.output_now();
-    
+    ans_tree.output();
 }
 
 void dbg(){
@@ -215,8 +323,15 @@ int main() {
     ios::sync_with_stdio(false);
 	cin.tie(nullptr);
     input();
-    test();
+    //test();
+    solve();
     output();
+
+    /*
+    提出前に正しい関数だけ残してるか確認！！
+    以下のis_localもちゃんとしてるか確認！！
+    */
+
     //is_local = true;
     if(is_local) dbg();
 }
