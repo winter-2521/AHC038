@@ -32,6 +32,11 @@ random_device rnd;
 mt19937 rng(252521);
 bool is_local = false;
 
+//各種エラー・不具合検知用定数
+const int OPERATION_SUCCESS    = 0;
+const int OPERATION_LIMIT_OVER = -2521;
+const int INVALID_MOVE         = -2522;
+
 //Timerクラス (焼ける未来が見えないので使うか怪しい)
 class Timer {
     public:
@@ -76,7 +81,7 @@ vector<string> s,t;
 bool is_input = false; //入力したか？の変数，使うかこれ？
 const int first_v = 5; //頂点数5で頭いいアルゴリズム思いついたとき用，頂点多いほど良さそうなので使わなさそう
 const int op_limit = 100000; //操作回数の上限値
-//const int op_limit = 110; //操作回数の上限値
+//const int op_limit = 110; //操作回数の上限値 (デバッグ時)
 
 //2座標のマンハッタン距離
 int dist(pair<int,int> a,pair<int,int> b){
@@ -93,11 +98,25 @@ char dir(pair<int,int> a,pair<int,int> b){
     return '.';
 }
 
+//座標がn×nのマス目の中に含まれているか判定するための関数
+//主に移動後の根が座標内に残っているか見るために使う
+bool is_valid(pair<int,int> p){
+    if(p.first < 0 || p.second < 0 || p.first >= n || p.second >= n) return false;
+    else return true;
+}
+
 //辺の構造体・何も考えてない設計
 struct Edge{
     int to = -1;
     int w;
 };
+
+//辺に付与した頂点の向きベクトルを回転させたもの
+pair<int,int> rotate(pair<int,int> p,char c){
+    if(c == 'L') return make_pair(-p.second,p.first);
+    if(c == 'R') return make_pair(p.second,-p.first);
+    return p;
+}
 
 //どこにたこ焼きがあるかなどを管理する構造体(というか関数の集合体)
 struct Grid_info{
@@ -160,7 +179,8 @@ struct Arm_tree{
     vector<vector<Edge> > g; //木の隣接リスト表現
     vector<pair<int,int>> now; //各頂点の今の座標
     vector<string> op_history; //各回の操作を保存
-    vector<bool> is_hand;
+    vector<vector<pair<int,int>> > edge_dir; //辺の向き
+    vector<bool> is_hand; //今たこ焼きを持っているか
 
     bool is_init = false;
     Arm_tree(int sz = 1) : sz(sz),p(sz),g(sz) {};
@@ -185,8 +205,7 @@ struct Arm_tree{
 
         p[v] = {u,w};
         g[u].push_back((Edge){v,w});
-        g[v].push_back((Edge){u,w});
-
+        //g[v].push_back((Edge){u,w});
     }
 
     //木を作った後に初期化をする関数
@@ -195,6 +214,7 @@ struct Arm_tree{
         assert(sz == p.size());
         assert(sz == g.size());
         bool ok = true;
+        edge_dir.resize(sz,vector<pair<int,int>>(sz,make_pair(-1,-1)));
 
         rep(i,sz)if(g[i].size() == 0) ok = false;
         if(!ok){
@@ -227,7 +247,7 @@ struct Arm_tree{
     //vに入っている関節を回す・頂点iの親を軸としてi以下の頂点を回す．
     //putに入っている頂点はPにする
     //この設計がいい感じかはまだ未検討
-    bool op(char c,vector<int,char> &v,vint &put){
+    int op(char c,vector<int,char> &v,vint &put){
         assert(is_init);
         string ops(2*sz,'.');
         
@@ -240,6 +260,15 @@ struct Arm_tree{
         rep(i,sz){
             now[i].first += ps.first;
             now[i].second += ps.second;
+        }
+
+        //移動後に根が座標外に出るような操作は受け付けない
+        if(!is_valid(now[0])){
+            rep(i,sz){
+                now[i].first -= ps.first;
+                now[i].second -= ps.second;
+            }
+            return INVALID_MOVE;
         }
         ops[0] = c;
 
@@ -267,9 +296,10 @@ struct Arm_tree{
 
         if(op_history.size() < op_limit){
             op_history.push_back(ops);
-            return true;
         }
-        else return false;
+        else return OPERATION_LIMIT_OVER;
+
+        return OPERATION_SUCCESS;
     }
 
     //操作を行うとどの頂点がどこに行くかをシミュレートして座標を返す関数
@@ -466,6 +496,7 @@ Arm_tree solve_1(){
             if(s[x][y] == '1' && !res.is_hand[i]) put.push_back(i);
             if(t[x][y] == '1' && res.is_hand[i]) put.push_back(i);
         }
+
         /*/
         cerr << "op = " << op_dir << endl;
         cerr << "f_pos = " << f_pos.first << " pos = (" << f_pos.second.first << "," << f_pos.second.second << ")" << endl;
@@ -476,6 +507,7 @@ Arm_tree solve_1(){
             cerr << s[i] << endl;
         }
         //*/
+
         if(!res.op(op_dir,cir,put)) break;
     }
 
