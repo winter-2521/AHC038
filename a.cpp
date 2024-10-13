@@ -80,16 +80,16 @@ int n,m,v;
 vector<string> s,t;
 bool is_input = false; //入力したか？の変数，使うかこれ？
 const int first_v = 5; //頂点数5で頭いいアルゴリズム思いついたとき用，頂点多いほど良さそうなので使わなさそう
-const int op_limit = 100000; //操作回数の上限値
-//const int op_limit = 110; //操作回数の上限値 (デバッグ時)
+const int op_limit = 12000; //操作回数の上限値
+//const int op_limit = 105; //操作回数の上限値 (デバッグ時)
 
 //2座標のマンハッタン距離
 int dist(pair<int,int> a,pair<int,int> b){
-    return abs(a.first-b.first)+abs(a.second+b.second);
+    return abs(a.first-b.first)+abs(a.second-b.second);
 }
 
 //座標a -> 座標bに移動するとき次の一手でどの向きに進むか
-//現状アームを横に伸ばしているので上下移動でラッキー狙いをするため，上下移動優先 (ver1)
+//現状アームを横に伸ばしているので上下移動でラッキー狙いをするため，上下移動優先 (ver1) -> どうでもよくなりました
 char dir(pair<int,int> a,pair<int,int> b){
     if(a.first < b.first) return 'D';
     if(a.first > b.first) return 'U';
@@ -106,6 +106,12 @@ bool is_valid(pair<int,int> p){
 }
 
 //辺の構造体・何も考えてない設計
+struct pEdge{
+    int par = -1;
+    int w;
+};
+
+//辺の構造体2・何も考えてない設計
 struct Edge{
     int to = -1;
     int w;
@@ -118,7 +124,15 @@ pair<int,int> rotate(pair<int,int> p,char c){
     return p;
 }
 
+/*
+          (-1,0)
+
+(0,-1) <-        ->(0,1)
+          (1,0)
+*/
+
 //どこにたこ焼きがあるかなどを管理する構造体(というか関数の集合体)
+//将来的にいくつか戦略を試すことを考えると，切り分けてs,tに直接書き込まない設計にしたほうが良さそうなので作った
 struct Grid_info{
 
     //盤面が完成しきっているか判定
@@ -172,10 +186,9 @@ struct Grid_info{
 };
  
 //アームを表す木の構造体
-//実装だるすぎて辺の重みは何も考慮していません->だるいけど考慮します...
 struct Arm_tree{
     int sz; //頂点数
-    vector<Edge> p; //木の順列表現
+    vector<pEdge> p; //木の順列表現
     vector<vector<Edge> > g; //木の隣接リスト表現
     vector<pair<int,int>> now; //各頂点の今の座標
     vector<string> op_history; //各回の操作を保存
@@ -197,15 +210,15 @@ struct Arm_tree{
             cerr << "You may add edge for same vertex" << endl;
             assert(u != v);
         }
-        if(p[v].to != -1){
+        if(p[v].par != -1){
             if(is_init) cerr << "You can't add edge after initialize" << endl;
             cerr << "This edge break the tree" << endl;
-            assert(p[v].to == -1);
+            assert(p[v].par == -1);
         }
 
         p[v] = {u,w};
         g[u].push_back((Edge){v,w});
-        //g[v].push_back((Edge){u,w});
+        g[v].push_back((Edge){u,w});
     }
 
     //木を作った後に初期化をする関数
@@ -214,13 +227,7 @@ struct Arm_tree{
         assert(sz == p.size());
         assert(sz == g.size());
         bool ok = true;
-        edge_dir.resize(sz,vector<pair<int,int>>(sz,make_pair(-1,-1)));
-
-        rep(i,sz)if(g[i].size() == 0) ok = false;
-        if(!ok){
-            cerr << "This tree has a independent vertex" << endl;
-            assert(ok);
-        }
+        edge_dir.resize(sz,vector<pair<int,int>>(sz,make_pair(0,1)));
 
         //DFSして各頂点の座標を求める
         const pair<int,int> default_coord = make_pair(-1,-1);
@@ -247,9 +254,40 @@ struct Arm_tree{
     //vに入っている関節を回す・頂点iの親を軸としてi以下の頂点を回す．
     //putに入っている頂点はPにする
     //この設計がいい感じかはまだ未検討
-    int op(char c,vector<int,char> &v,vint &put){
+    int op(char c,vector<pair<int,char>> &v,vint &put){
         assert(is_init);
         string ops(2*sz,'.');
+
+        //うまく回転させる処理普通にわからないんですが...
+        sort(ALL(v));
+        for(auto [vs,cs] : v){
+            ops[vs] = cs;
+            edge_dir[p[vs].par][vs] = rotate(edge_dir[p[vs].par][vs],cs);
+            //DFSして子の部分木に回転を伝播させていく
+            auto dfs = [&](auto f,int v2,int p)->void{
+                for(auto nxt : g[v2])if(p != nxt.to){
+                    edge_dir[v2][nxt.to] = rotate(edge_dir[v2][nxt.to],cs);
+                    f(f,nxt.to,v2);
+                }
+            };
+            dfs(dfs,vs,p[vs].par);
+        }
+
+        //DFSして辺の向きを反映
+        queue<int> q;
+        q.push(0);
+        vector<bool> vis(sz,false);
+        vis[0] = true;
+        while(!q.empty()){
+            int nxt = q.front();
+            q.pop();
+            vis[nxt] = true;
+            for(auto [to,w] : g[nxt])if(!vis[to]){
+                auto [ud,vd] = edge_dir[nxt][to]; 
+                q.push(to);
+                now[to] = make_pair(now[nxt].first+w*ud,now[nxt].second+w*vd);
+            }
+        }
         
         //アーム全体を動かす処理
         pair<int,int> ps = {0,0};
@@ -271,8 +309,6 @@ struct Arm_tree{
             return INVALID_MOVE;
         }
         ops[0] = c;
-
-        //うまく回転させる処理普通にわからないんですが...
 
         //putの座標でつかむ処理
         for(int x : put){
@@ -304,8 +340,40 @@ struct Arm_tree{
 
     //操作を行うとどの頂点がどこに行くかをシミュレートして座標を返す関数
     //実際にアームを動かすわけではないことに注意
-    vector<pair<int,int> > sim_op(char c,vector<int,char> &v){
+    vector<pair<int,int> > sim_op(char c,vector<pair<int,char>> &v){
         vector<pair<int,int> > res = now;
+
+        //回転を行う処理
+        //根に近いほうから毎回伝搬させてく感じ
+        vector<vector<pair<int,int>> > e_dir = edge_dir;
+        sort(ALL(v));
+        for(auto [vs,cs] : v){
+            e_dir[p[vs].par][vs] = rotate(e_dir[p[vs].par][vs],cs);
+            //DFSして子の部分木に回転を伝播させていく
+            auto dfs = [&](auto f,int v2,int p)->void{
+                for(auto [nxt,_] : g[v2])if(p != nxt){
+                    e_dir[v2][nxt] = rotate(e_dir[v2][nxt],cs);
+                    f(f,nxt,v2);
+                }
+            };
+            dfs(dfs,vs,p[vs].par);
+        }
+
+        //DFSして辺の向きを反映
+        queue<int> q;
+        q.push(0);
+        vector<bool> vis(sz,false);
+        vis[0] = true;
+        while(!q.empty()){
+            int nxt = q.front();
+            vis[nxt] = true;
+            q.pop();
+            for(auto [to,w] : g[nxt])if(!vis[to]){
+                auto [ud,vd] = e_dir[nxt][to]; 
+                q.push(to);
+                res[to] = make_pair(res[nxt].first+w*ud,res[nxt].second+w*vd);
+            }
+        }
 
         //アーム全体を動かす処理
         pair<int,int> ps = {0,0};
@@ -314,16 +382,25 @@ struct Arm_tree{
         if(c == 'U') ps.first--;
         if(c == 'D') ps.first++;
         rep(i,sz){
-            res[i] = make_pair(now[i].first+ps.first,now[i].second+ps.second);
+            res[i] = make_pair(res[i].first+ps.first,res[i].second+ps.second);
         }
 
-        //回転はまだうまくできていないので略
         return res;
     }
 
     //頂点vは葉ですか？
     bool is_leaf(int v){
         return g[v].size() == 1;
+    }
+
+    //その場所へ行こうとしたときに盤面外に飛び出すかどうかを検知する関数
+    bool is_reach(char dir,pair<int,int> pos,pair<int,int> tar){
+        pair<int,int> e_dir = edge_dir[0][1];
+        if(dir != '.') e_dir = rotate(e_dir,dir);
+        int par_dist = dist(now[0],pos);
+        tar.first = tar.first-e_dir.first*par_dist;
+        tar.second = tar.second-e_dir.second*par_dist;
+        return is_valid(tar);
     }
 
     //葉の頂点リストを返す
@@ -369,7 +446,7 @@ struct Arm_tree{
     //木をよく見るグラフ表記で出力する関数
     void output_g(){
         cout << sz << " " << sz-1 << endl;
-        rep(i,sz)if(i) cout << p[i].to << " " << i << endl;
+        rep(i,sz)if(i) cout << p[i].par << " " << i << endl;
     }
 
     //今までの操作列を出力
@@ -384,7 +461,7 @@ struct Arm_tree{
     void output(){
         cout << sz << endl;
         rep(i,sz)if(i){
-            cout << p[i].to << " " << p[i].w << endl;
+            cout << p[i].par << " " << p[i].w << endl;
         }
         //開始座標を原点に固定してることに注意(ver1)
         cout << 0 << " " << 0 << endl;
@@ -438,6 +515,7 @@ Arm_tree solve_1(){
 
     auto vs = res.leaf_pos();
     const int INF = 252521;
+    int turn = 0;
     while(!g.is_clear()){
         int tako_dist = INF;
         int dest_dist = INF;
@@ -446,25 +524,133 @@ Arm_tree solve_1(){
         char op_dir  = '.';
         auto f_pos = res.free_leaf_top();
         auto nf_pos = res.nfree_leaf_top();
-        vector<int,char> cir;
+        vector<pair<int,char>> tako_cir,dest_cir,cir;
         vint put;
 
         //一番近いたこ焼きを拾う処理
+        //お，重すぎる...回転するしないを全部試してvalidなので更新
+
         if(g.tako_count() > 0){
-            auto tako_pos = g.tako_pos();
-            assert(tako_pos.size() > 0);
-            sort(ALL(tako_pos),[&](auto i,auto j){return dist(f_pos.second,i) < dist(f_pos.second,j);});
-            tako_dist = dist(f_pos.second,tako_pos[0]);
-            tako_dir = dir(f_pos.second,tako_pos[0]);
+            //cerr << turn++ << endl;
+            for(char c : {'.','L','R'}){
+                int tako_dist2 = INF;
+                char tako_dir2 = '.';
+                auto tako_pos = g.tako_pos();
+                assert(tako_pos.size() > 0);
+                vector<pair<int,char>> test = {{1,c},{2,c}};
+                if(c == '.'){
+                    sort(ALL(tako_pos),[&](auto i,auto j){return dist(f_pos.second,i) < dist(f_pos.second,j);});
+
+                    tako_dist2 = dist(f_pos.second,tako_pos[0]);
+                    tako_dir2 = dir(f_pos.second,tako_pos[0]);
+
+                    pair<int,int> root_pos = res.now[0];
+                    if(tako_dir2 == 'L') root_pos.second--;
+                    if(tako_dir2 == 'R') root_pos.second++;
+                    if(tako_dir2 == 'U') root_pos.first--;
+                    if(tako_dir2 == 'D') root_pos.first++;
+
+                    if(is_valid(root_pos) && res.is_reach(c,f_pos.second,tako_pos[0])){
+                        tako_dist = tako_dist2;
+                        tako_dir = tako_dir2;
+                        // cerr << "valid!" << endl;
+                        // cerr << "tako[0] = " << tako_pos[0].first << " " << tako_pos[0].second << endl;
+                        // cerr << "fpos = " << f_pos.second.first << " " << f_pos.second.second << endl;
+                        // cerr  << c << " " << tako_dist2 << " " << tako_dir2 << endl; 
+                    }
+                }else{
+                    auto sim_pos = res.sim_op('.',test);
+                    // int ppppp = 0;
+                    // for(auto p : sim_pos) cerr << ppppp++ << " " << p.first << " " << p.second << endl;
+
+                    pair<int,pii> f2_pos = make_pair(-1,make_pair(-1,-1));
+                    rep(i,res.sz)if(res.is_leaf(i)){
+                        if(!res.is_hand[i]){
+                            f2_pos = make_pair(i,sim_pos[i]);
+                            break;
+                        }
+                    }
+
+                    sort(ALL(tako_pos),[&](auto i,auto j){return dist(f2_pos.second,i) < dist(f2_pos.second,j);});
+
+                    tako_dist2 = dist(f2_pos.second,tako_pos[0]);
+                    tako_dir2 = dir(f2_pos.second,tako_pos[0]);
+                    pair<int,int> root_pos = res.now[0];
+                    if(tako_dir2 == 'L') root_pos.second--;
+                    if(tako_dir2 == 'R') root_pos.second++;
+                    if(tako_dir2 == 'U') root_pos.first--;
+                    if(tako_dir2 == 'D') root_pos.first++;
+                    
+                    if(is_valid(root_pos) && tako_dist > tako_dist2 
+                        && tako_dist2 != INF && f2_pos.first != -1
+                        && res.is_reach(c,f2_pos.second,tako_pos[0])){
+                        tako_dist = tako_dist2;
+                        tako_dir = tako_dir2;
+                        tako_cir = test;
+                    }
+                    // cerr << "tako[0] = " << tako_pos[0].first << " " << tako_pos[0].second << endl;
+                    // cerr << "f2pos = " << f2_pos.second.first << " " << f2_pos.second.second << endl;
+                    // cerr  << c << " " << tako_dist2 << " " << tako_dir2 << endl; 
+                }
+            }
+            //assert(0);
+            //cerr << tako_dist << " " << tako_dir << endl;
         }
 
         //一番近い目的地に向かう処理
-        if(g.dest_count() > 0){ //完成より前に目的地がなくなることはないため，ここは必ず通る想定
-            auto dest_pos = g.dest_pos();
-            assert(dest_pos.size() > 0);
-            sort(ALL(dest_pos),[&](auto i,auto j){return dist(nf_pos.second,i) < dist(nf_pos.second,j);});
-            dest_dist = dist(nf_pos.second,dest_pos[0]);
-            dest_dir = dir(nf_pos.second,dest_pos[0]);
+        if(g.dest_count() > 0){//完成より前に目的地がなくなることはないため，ここは必ず通る想定
+            for(char c : {'.','L','R'}){
+                int dest_dist2 = INF;
+                char dest_dir2 = '.';
+                auto dest_pos = g.dest_pos();
+                assert(dest_pos.size() > 0);
+                vector<pair<int,char>> test = {{1,c},{2,c}};
+                if(c == '.'){
+                    sort(ALL(dest_pos),[&](auto i,auto j){return dist(nf_pos.second,i) < dist(nf_pos.second,j);});
+
+                    dest_dist2 = dist(nf_pos.second,dest_pos[0]);
+                    dest_dir2 = dir(nf_pos.second,dest_pos[0]);
+
+                    pair<int,int> root_pos = res.now[0];
+                    if(dest_dir2 == 'L') root_pos.second--;
+                    if(dest_dir2 == 'R') root_pos.second++;
+                    if(dest_dir2 == 'U') root_pos.first--;
+                    if(dest_dir2 == 'D') root_pos.first++;
+
+                    if(is_valid(root_pos) && res.is_reach(c,nf_pos.second,dest_pos[0])){
+                        dest_dist = dest_dist2;
+                        dest_dir = dest_dir2;
+                    }
+                }else{
+                    auto sim_pos = res.sim_op('.',test);
+
+                    pair<int,pii> nf2_pos = make_pair(-1,make_pair(-1,-1));
+                    rep(i,res.sz)if(res.is_leaf(i)){
+                        if(res.is_hand[i]){
+                            nf2_pos = make_pair(i,sim_pos[i]);
+                            break;
+                        }
+                    }
+
+                    sort(ALL(dest_pos),[&](auto i,auto j){return dist(nf2_pos.second,i) < dist(nf2_pos.second,j);});
+
+                    dest_dist2 = dist(nf2_pos.second,dest_pos[0]);
+                    dest_dir2 = dir(nf2_pos.second,dest_pos[0]);
+                    pair<int,int> root_pos = res.now[0];
+                    if(dest_dir2 == 'L') root_pos.second--;
+                    if(dest_dir2 == 'R') root_pos.second++;
+                    if(dest_dir2 == 'U') root_pos.first--;
+                    if(dest_dir2 == 'D') root_pos.first++;
+                    
+                    if(is_valid(root_pos) && dest_dist > dest_dist2 
+                        && dest_dist2 != INF && nf2_pos.first != -1
+                        && res.is_reach(c,nf2_pos.second,dest_pos[0])){
+                        dest_dist = dest_dist2;
+                        dest_dir = dest_dir2;
+                        dest_cir = test;
+                    }
+                }
+            }
         }
 
         //盤面が完成していないとき，どちらかは必ず更新される．
@@ -472,9 +658,11 @@ Arm_tree solve_1(){
 
         if(tako_dist <= dest_dist){ //たこ焼き優先の分岐
             op_dir = tako_dir;
+            cir = tako_cir;
         }
         else if(tako_dist > dest_dist){ //目的地優先の分岐
             op_dir = dest_dir;
+            cir = dest_cir;
         }else{
             bool THIS_SECTION_IS_NOT_USE = false;
             //assert(THIS_SECTION_IS_NOT_USE);
@@ -482,33 +670,37 @@ Arm_tree solve_1(){
 
         if(f_pos.first == -1){ //たこ焼きをもう持てない
             op_dir = dest_dir;
+            cir = dest_cir;
         }
         else if(nf_pos.first == -1){ //置くためのたこ焼きがない
             op_dir = tako_dir;
+            cir = tako_cir;
         }
 
         auto sim_pos = res.sim_op(op_dir,cir);
+        set<pair<int,int> > st;
         rep(i,res.sz)if(res.is_leaf(i)){
             auto [x,y] = sim_pos[i];
-            if(x < 0 || y < 0 || x >= n || y >= n) continue;
+            if(x < 0 || y < 0 || x >= n || y >= n || st.find(make_pair(x,y)) != st.end()) continue;
             //cerr << res.now[i].first << " " << res.now[i].second << " " << op_dir << endl;
             //cerr << x << " " << y << endl;
-            if(s[x][y] == '1' && !res.is_hand[i]) put.push_back(i);
-            if(t[x][y] == '1' && res.is_hand[i]) put.push_back(i);
+            if(s[x][y] == '1' && !res.is_hand[i]) put.push_back(i),st.insert(make_pair(x,y));
+            if(t[x][y] == '1' && res.is_hand[i]) put.push_back(i),st.insert(make_pair(x,y));
         }
-
+        int ret = res.op(op_dir,cir,put);
+        
         /*/
-        cerr << "op = " << op_dir << endl;
+        cerr << "op = " << res.op_history.back() << endl;
         cerr << "f_pos = " << f_pos.first << " pos = (" << f_pos.second.first << "," << f_pos.second.second << ")" << endl;
         cerr << "nf_pos = " << nf_pos.first << " pos = (" << nf_pos.second.first << "," << nf_pos.second.second << ")" << endl;
         cerr << "tako_dist = " << tako_dist << " dest_dist = " << dest_dist << endl;
         cerr << "tako_dir = " << tako_dir << " dest_dir = " << dest_dir << endl; 
+        if(put.size()){cerr << "put pos = "; for(int x : put) cerr << x << " ";  cerr << endl;}
         rep(i,n){
             cerr << s[i] << endl;
         }
         //*/
-
-        if(!res.op(op_dir,cir,put)) break;
+        if(ret < 0) break;
     }
 
     return res;
