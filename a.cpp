@@ -214,7 +214,7 @@ struct Arm_tree{
     int sx = 0,sy = 0; //根の初期位置
 
     bool is_init = false;
-    Arm_tree(int sz = 1) : sz(sz),p(sz),g(sz) {};
+    Arm_tree(int sx = 0,int sy = 0,int sz = 1) : sx(sx),sy(sy),sz(sz),p(sz),g(sz) {};
 
     //辺の追加をする関数
     //u-vに重みwの辺を張る，initしてからadd_edgeしたら怒る
@@ -488,8 +488,7 @@ struct Arm_tree{
         rep(i,sz)if(i){
             cout << p[i].par << " " << p[i].w << endl;
         }
-        //開始座標を原点に固定してることに注意(ver1)
-        cout << 0 << " " << 0 << endl;
+        cout << sx << " " << sy << endl;
         output_history();
     }
 };
@@ -733,16 +732,16 @@ Arm_tree solve_1(){
 
 
 int arm_num(int x){
-    if(x <= 45) return 10;
-    if(x <= 60) return 9;
-    else if(x <= 100) return 8;
-    else if(x <= 150) return 7;
-    return 6;
+    if(x <= 45) return 9;
+    if(x <= 60) return 8;
+    else if(x <= 100) return 7;
+    else if(x <= 150) return 6;
+    return 5;
 }
 //ver2 戦略
 //一本のくそ長アームを使ってゴリ押し
-Arm_tree solve_2(){
-    Arm_tree res;
+Arm_tree solve_2(int sx = 0,int sy = 0){
+    Arm_tree res(sx,sy);
     int nv = min(arm_num(m),v);
     rep(i,nv)if(i){
         res.add_edge(i-1,i,rng()%3+1);
@@ -774,6 +773,7 @@ Arm_tree solve_2(){
         if(!timer.yet(time_limit)) break;
 
         int best_dist = 2521;
+        vector<vint> mem(31,vint(31,0));
         map<pair<int,int>,vector<pair<int,char>>> can_go;
         rep(tbit,three_pow[res.sz]){
             int bit = tbit;
@@ -787,9 +787,7 @@ Arm_tree solve_2(){
             }
 
             vector<pii> op_sim = res.sim_op(op_dir,test_cir);
-
             if(can_go.find(op_sim[arm]) == can_go.end()) can_go[op_sim[arm]] = test_cir;
-            
         }
 
         for(auto [ps,now_cir] : can_go){
@@ -825,13 +823,138 @@ Arm_tree solve_2(){
     return res;
 }
 
+//ver2.1
+//何も思いつかない
+Arm_tree solve_3(int sx = 0,int sy = 0){
+    Arm_tree res(sx,sy);
+    int nv = min(arm_num(m)-1,v);
+    rep(i,nv)if(i){
+        res.add_edge(i-1,i,rng()%3+1);
+    }
+    cerr << nv << " " << v << endl;
+    if(nv+1 == v) return res;
+    res.add_edge(nv-2,nv,res.p[nv-1].w+1);
+    res.init_for_arm();
+    //アームの頂点番号
+    int arm = res.sz-2,arm2 = res.sz-1;
+
+    //3進数でのbit全探索みたいなことをしたいのでべき乗を前計算
+    vint three_pow(18,1); rep(i,17) three_pow[i+1] = three_pow[i]*3;
+
+    int cnt = 0;
+    while(!g.is_clear()){
+        char op_dir = '.';
+        vector<pair<int,char>> cir;
+        pair<int,int> pos,root = res.now[0];
+        vint put;
+        put.reserve(2521);
+
+        if(res.is_hand[arm]){
+            auto dest_pos = g.dest_pos();
+            sort(ALL(dest_pos),[&](auto i,auto j){return dist(root,i) < dist(root,j);});
+            pos = dest_pos[0];
+        }else{
+            auto tako_pos = g.tako_pos();
+            sort(ALL(tako_pos),[&](auto i,auto j){return dist(root,i) < dist(root,j);});
+            pos = tako_pos[0];
+        }
+
+        if(!timer.yet(time_limit)) break;
+
+        int best_dist = 2521;
+        map<pair<int,int>,vector<pair<int,char>>> can_go;
+        rep(tbit,three_pow[res.sz]){
+            int bit = tbit;
+            vector<pair<int,char>> test_cir;
+
+            rep(i,res.sz){
+                int tar = bit%3;
+                if(tar == 1 && i != 0) test_cir.push_back(make_pair(i,'L'));
+                else if(tar == 2 && i != 0) test_cir.push_back(make_pair(i,'R'));
+                bit /= 3;
+            }
+
+            vector<pii> op_sim = res.sim_op(op_dir,test_cir);
+            if(can_go.find(op_sim[arm]) == can_go.end()) can_go[op_sim[arm]] = test_cir;
+            else if(is_valid(op_sim[arm2])){
+                auto [us,vs] = op_sim[arm2];
+                if((res.is_hand[arm2] && t[us][vs] == '1') || (!res.is_hand[arm2] && s[us][vs] == '1')) can_go[op_sim[arm]] = test_cir;
+            }
+        }
+
+        for(auto [ps,now_cir] : can_go){
+            char now_dir = dir(ps,pos);
+            pii root_pos = res.now[0];
+            if(now_dir == 'L') root_pos.second--;
+            if(now_dir == 'R') root_pos.second++;
+            if(now_dir == 'U') root_pos.first--;
+            if(now_dir == 'D') root_pos.first++;
+            if(!is_valid(root_pos)) continue;
+            auto gt = res.sim_op(now_dir,now_cir);
+            int dist2 = dist(pos,gt[arm]);
+            if(best_dist > dist2){
+                best_dist = dist2;
+                op_dir = now_dir;
+                cir = now_cir;
+            }
+        }
+
+        auto op_sim = res.sim_op(op_dir,cir);
+        if(is_valid(op_sim[arm])){
+            auto [us,vs] = op_sim[arm];
+            if((res.is_hand[arm] && t[us][vs] == '1') || (!res.is_hand[arm] && s[us][vs] == '1')) put.push_back(arm);
+        }
+        // cerr << arm<< "" << arm2 << endl;
+        // cerr << "sz = " << res.is_hand.size() << endl;
+        // cerr << "psz = " << put.size() << endl;
+        bool puk = false;
+        if(is_valid(op_sim[arm2])){
+            auto [us,vs] = op_sim[arm2];
+            //cerr << us << " " << vs << endl;
+            //if((res.is_hand[arm2] && t[us][vs] == '1') || (!res.is_hand[arm2] && s[us][vs] == '1')) put.push_back(arm2);
+        }
+
+        //for(auto x : put) cerr << "put ->" << x << endl;
+
+        int ret = res.op(op_dir,cir,put);
+        if(ret < 0){
+            cerr << ret << endl;
+            break;
+        }
+    }
+    if(g.is_clear()) res.is_ok = true;
+    return res;
+}
+
 //solve関数
 void solve(){
     Arm_tree sol1 = solve_1();
     ans_tree = sol1;
     g.reset();
-    Arm_tree sol2 = solve_2();
-    if(ans_tree.cost() > sol2.cost()) ans_tree = sol2;
+    if(m <= 85){
+        Arm_tree sol2 = solve_2();
+        g.reset();
+        if(ans_tree.cost() > sol2.cost()) ans_tree = sol2;
+    }
+    Arm_tree sol3 = solve_3();
+    g.reset();
+    if(ans_tree.cost() > sol3.cost()) ans_tree = sol3;
+
+    queue<pair<int,int>> q;
+    q.push(make_pair(0,0));
+    q.push(make_pair(n-1,0));
+    q.push(make_pair(0,n-1));
+    q.push(make_pair(n-1,n-1));
+    while(timer.yet(time_limit)){
+        auto ps = q.front();
+        q.pop(); q.push(ps);
+        Arm_tree sol2 = solve_2(ps.first,ps.second);
+        g.reset();
+        if(ans_tree.cost() > sol2.cost()) ans_tree = sol2;
+    }
+    // cerr << n << " " << m << endl;
+    // cerr << "sol1 = " << sol1.cost() << endl;
+    // cerr << "ansc = " << ans_tree.cost() << endl;
 }
 
 void output(){
