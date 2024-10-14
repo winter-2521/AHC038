@@ -731,12 +731,21 @@ Arm_tree solve_1(){
     return res;
 }
 
+
+int arm_num(int x){
+    if(x <= 45) return 10;
+    if(x <= 60) return 9;
+    else if(x <= 100) return 8;
+    else if(x <= 150) return 7;
+    return 6;
+}
 //ver2 戦略
 //一本のくそ長アームを使ってゴリ押し
 Arm_tree solve_2(){
     Arm_tree res;
-    rep(i,v)if(i){
-        res.add_edge(i-1,i);
+    int nv = min(arm_num(m),v);
+    rep(i,nv)if(i){
+        res.add_edge(i-1,i,rng()%3+1);
     }
     res.init_for_arm();
     //アームの頂点番号
@@ -745,7 +754,9 @@ Arm_tree solve_2(){
     //3進数でのbit全探索みたいなことをしたいのでべき乗を前計算
     vint three_pow(18,1); rep(i,17) three_pow[i+1] = three_pow[i]*3;
 
+    int cnt = 0;
     while(!g.is_clear()){
+        char op_dir = '.';
         vector<pair<int,char>> cir;
         pair<int,int> pos,root = res.now[0];
         vint put;
@@ -753,18 +764,61 @@ Arm_tree solve_2(){
         if(res.is_hand[arm]){
             auto dest_pos = g.dest_pos();
             sort(ALL(dest_pos),[&](auto i,auto j){return dist(root,i) < dist(root,j);});
+            pos = dest_pos[0];
+        }else{
+            auto tako_pos = g.tako_pos();
+            sort(ALL(tako_pos),[&](auto i,auto j){return dist(root,i) < dist(root,j);});
+            pos = tako_pos[0];
         }
 
         if(!timer.yet(time_limit)) break;
 
+        int best_dist = 2521;
+        map<pair<int,int>,vector<pair<int,char>>> can_go;
         rep(tbit,three_pow[res.sz]){
             int bit = tbit;
             vector<pair<int,char>> test_cir;
+
             rep(i,n){
                 int tar = bit%3;
-                if(tar == 1)
+                if(tar == 1 && i != 0) test_cir.push_back(make_pair(i,'L'));
+                else if(tar == 2 && i != 0) test_cir.push_back(make_pair(i,'R'));
                 bit /= 3;
             }
+
+            vector<pii> op_sim = res.sim_op(op_dir,test_cir);
+
+            if(can_go.find(op_sim[arm]) == can_go.end()) can_go[op_sim[arm]] = test_cir;
+            
+        }
+
+        for(auto [ps,now_cir] : can_go){
+            char now_dir = dir(ps,pos);
+            pii root_pos = res.now[0];
+            if(now_dir == 'L') root_pos.second--;
+            if(now_dir == 'R') root_pos.second++;
+            if(now_dir == 'U') root_pos.first--;
+            if(now_dir == 'D') root_pos.first++;
+            if(!is_valid(root_pos)) continue;
+            auto gt = res.sim_op(now_dir,now_cir);
+            int dist2 = dist(pos,gt[arm]);
+            if(best_dist > dist2){
+                best_dist = dist2;
+                op_dir = now_dir;
+                cir = now_cir;
+            }
+        }
+
+        auto op_sim = res.sim_op(op_dir,cir);
+        if(is_valid(op_sim[arm])){
+            auto [us,vs] = op_sim[arm];
+            if((res.is_hand[arm] && t[us][vs] == '1') || (!res.is_hand[arm] && s[us][vs] == '1')) put.push_back(arm);
+        }
+
+        int ret = res.op(op_dir,cir,put);
+        if(ret < 0){
+            cerr << ret << endl;
+            break;
         }
     }
     if(g.is_clear()) res.is_ok = true;
