@@ -4,10 +4,10 @@ using namespace std;
 /*
 author : winter
 for AHC038 2024-10-04
-ver1.0
+ver2.0
 ・アームを表すクラスをとりあえず作る (設計は詰めてない)
-・木は片側のみのムカデグラフみたいにする
-・移動もあまり頭いい方法ではない貪欲
+・とりあえずver1の貪欲が正しく動いてそう => Arm_treeクラスがバグってなさそうなので次に進む
+・長いアームをグネグネ動かしたほうが効率は良さそうなので長いアームを使う戦略をする
 ・ここのメモ更新するのだるいので結構忘れそう
 */
 
@@ -37,7 +37,7 @@ const int OPERATION_SUCCESS    = 0;
 const int OPERATION_LIMIT_OVER = -2521;
 const int INVALID_MOVE         = -2522;
 
-//Timerクラス (焼ける未来が見えないので使うか怪しい)
+//Timerクラス (焼ける未来が見えないので使うか怪しい) -> 時間制限に引っ掛かりそうな戦略のbreakに使います
 class Timer {
     public:
         Timer() {
@@ -72,7 +72,7 @@ class Timer {
         chrono::system_clock::time_point start_time_;
         double elapsed_time_;
 };
-constexpr double time_limit = 1.95;
+constexpr double time_limit = 2.9;
 Timer timer;
 
 //各種変数のたまり場
@@ -133,7 +133,23 @@ pair<int,int> rotate(pair<int,int> p,char c){
 
 //どこにたこ焼きがあるかなどを管理する構造体(というか関数の集合体)
 //将来的にいくつか戦略を試すことを考えると，切り分けてs,tに直接書き込まない設計にしたほうが良さそうなので作った
+//結局デフォルトのs,tを内部に保持しておいて使いたいときにリセットする感じになった
 struct Grid_info{
+    vector<string> memo_s,memo_t;
+    Grid_info(vector<string> s,vector<string> t) : memo_s(s),memo_t(t) {}
+
+    //初期盤面保存用
+    void set_first_grid(){
+        memo_s = s;
+        memo_t = t;
+    }
+
+    //盤面のリセット
+    //solveで別の戦略組むときにつかう
+    void reset(){
+        s = memo_s;
+        t = memo_t;
+    }
 
     //盤面が完成しきっているか判定
     bool is_clear(){
@@ -188,12 +204,14 @@ struct Grid_info{
 //アームを表す木の構造体
 struct Arm_tree{
     int sz; //頂点数
+    bool is_ok = false; //完成したか記録
     vector<pEdge> p; //木の順列表現
     vector<vector<Edge> > g; //木の隣接リスト表現
     vector<pair<int,int>> now; //各頂点の今の座標
     vector<string> op_history; //各回の操作を保存
     vector<vector<pair<int,int>> > edge_dir; //辺の向き
     vector<bool> is_hand; //今たこ焼きを持っているか
+    int sx = 0,sy = 0; //根の初期位置
 
     bool is_init = false;
     Arm_tree(int sz = 1) : sz(sz),p(sz),g(sz) {};
@@ -234,7 +252,7 @@ struct Arm_tree{
         now.resize(sz,default_coord);
         queue<int> q;
         q.push(0);
-        now[0] = make_pair(0,0);
+        now[0] = make_pair(sx,sy);
         while(!q.empty()){
             int nxt = q.front();
             q.pop();
@@ -403,6 +421,13 @@ struct Arm_tree{
         return is_valid(tar);
     }
 
+    //このアームのスコアを返す
+    //中途半端な操作で終わってたら困るので完成してなければデカい値を返す
+    int cost(){
+        if(!is_ok) return 1000000;
+        else return op_history.size();
+    }
+
     //葉の頂点リストを返す
     vector<int> leafs(){
         vint res;
@@ -471,7 +496,7 @@ struct Arm_tree{
 
 //答えの木を保持するやつをグローバルに確保
 Arm_tree ans_tree;
-Grid_info g;
+Grid_info g(s,t);
 
 //入力を受け取る
 void input(){
@@ -488,6 +513,7 @@ void input(){
             s[i][j] = t[i][j] = '0';
         }
     }
+    g.set_first_grid();
 }
 
 
@@ -503,7 +529,6 @@ void test(){
 //ver1 戦略
 //横一列の葉を使ってグリッド上を走査する
 //たこやきの取得・設置も地獄の愚直をする
-//回転の頭いい使い方がわからないのでまずなしでやる
 Arm_tree solve_1(){
     //初期化と片ムカデグラフを作る
     Arm_tree res;
@@ -702,13 +727,57 @@ Arm_tree solve_1(){
         //*/
         if(ret < 0) break;
     }
+    if(g.is_clear()) res.is_ok = true;
+    return res;
+}
 
+//ver2 戦略
+//一本のくそ長アームを使ってゴリ押し
+Arm_tree solve_2(){
+    Arm_tree res;
+    rep(i,v)if(i){
+        res.add_edge(i-1,i);
+    }
+    res.init_for_arm();
+    //アームの頂点番号
+    int arm = res.sz-1; 
+
+    //3進数でのbit全探索みたいなことをしたいのでべき乗を前計算
+    vint three_pow(18,1); rep(i,17) three_pow[i+1] = three_pow[i]*3;
+
+    while(!g.is_clear()){
+        vector<pair<int,char>> cir;
+        pair<int,int> pos,root = res.now[0];
+        vint put;
+
+        if(res.is_hand[arm]){
+            auto dest_pos = g.dest_pos();
+            sort(ALL(dest_pos),[&](auto i,auto j){return dist(root,i) < dist(root,j);});
+        }
+
+        if(!timer.yet(time_limit)) break;
+
+        rep(tbit,three_pow[res.sz]){
+            int bit = tbit;
+            vector<pair<int,char>> test_cir;
+            rep(i,n){
+                int tar = bit%3;
+                if(tar == 1)
+                bit /= 3;
+            }
+        }
+    }
+    if(g.is_clear()) res.is_ok = true;
     return res;
 }
 
 //solve関数
 void solve(){
-    ans_tree = solve_1();
+    Arm_tree sol1 = solve_1();
+    ans_tree = sol1;
+    g.reset();
+    Arm_tree sol2 = solve_2();
+    if(ans_tree.cost() > sol2.cost()) ans_tree = sol2;
 }
 
 void output(){
