@@ -773,6 +773,8 @@ Arm_tree solve_2(){
 
         if(!timer.yet(time_limit)) break;
 
+        //ここで各関節を曲げる方向を全探索
+        //重すぎるんですがなんか頭いい方法あるかなあ
         int best_dist = 2521;
         map<pair<int,int>,vector<pair<int,char>>> can_go;
         rep(tbit,three_pow[res.sz]){
@@ -792,6 +794,8 @@ Arm_tree solve_2(){
             
         }
 
+        //いける場所を全探索
+        //その中で一番うまく目的を達成できるとこに動く
         for(auto [ps,now_cir] : can_go){
             char now_dir = dir(ps,pos);
             pii root_pos = res.now[0];
@@ -809,18 +813,21 @@ Arm_tree solve_2(){
             }
         }
 
+        //アームの持ち手部分に目的地があれば動く
         auto op_sim = res.sim_op(op_dir,cir);
         if(is_valid(op_sim[arm])){
             auto [us,vs] = op_sim[arm];
             if((res.is_hand[arm] && t[us][vs] == '1') || (!res.is_hand[arm] && s[us][vs] == '1')) put.push_back(arm);
         }
 
+        //エラー検知用
         int ret = res.op(op_dir,cir,put);
         if(ret < 0){
             cerr << ret << endl;
             break;
         }
     }
+    //完成していたらそのことを通知
     if(g.is_clear()) res.is_ok = true;
     return res;
 }
@@ -830,6 +837,8 @@ void solve(){
     Arm_tree sol1 = solve_1();
     ans_tree = sol1;
     g.reset();
+
+    //ver2の戦略を試してスコアが改善していたらswap
     Arm_tree sol2 = solve_2();
     if(ans_tree.cost() > sol2.cost()) ans_tree = sol2;
 }
